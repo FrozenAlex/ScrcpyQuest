@@ -1,4 +1,5 @@
 name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -49,6 +50,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         run: release/build_server.sh
 
       - name: Upload artifact
@@ -74,7 +76,8 @@ jobs:
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Build without gradle
+      - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }} without gradle
         run: server/build_without_gradle.sh
 
   test-client:
@@ -138,6 +141,7 @@ jobs:
              libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         run: release/build_linux.sh x86_64
 
       # upload-artifact does not preserve permissions
@@ -167,6 +171,7 @@ jobs:
              mingw-w64 mingw-w64-tools libz-mingw-w64-dev
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         run: release/build_windows.sh 32
 
       # upload-artifact does not preserve permissions
@@ -196,6 +201,7 @@ jobs:
              mingw-w64 mingw-w64-tools libz-mingw-w64-dev
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         run: release/build_windows.sh 64
 
       # upload-artifact does not preserve permissions
@@ -253,6 +259,7 @@ jobs:
             fi
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         run: release/build_windows.sh arm64
 
       - name: Check DLL dependencies
@@ -306,6 +313,7 @@ jobs:
             brew install meson nasm libiconv zlib automake autoconf libtool
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         env:
           # the default Xcode (and macOS SDK) version can be found at
           # <https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md#xcode>
@@ -349,6 +357,7 @@ jobs:
              # autoconf and libtool are already installed on macos-13
 
       - name: Build
+run-name: Build ${{ inputs.name || github.ref_name }}
         env:
           # the default Xcode (and macOS SDK) version can be found at
           # <https://github.com/actions/runner-images/blob/main/images/macos/macos-13-Readme.md#xcode>
