@@ -112,6 +112,10 @@ enum {
     OPT_IGNORE_VIDEO_ENCODER_CONSTRAINTS,
     OPT_NO_TERMINAL_TITLE,
     OPT_HWDEC,
+    OPT_QUEST_CINEMATIC,
+    OPT_QUEST_DISABLE_PROXIMITY,
+    OPT_QUEST_DISABLE_BOUNDARY,
+    OPT_RECONNECT,
 };
 
 struct sc_option {
@@ -793,6 +797,26 @@ static const struct sc_option options[] = {
                 "Default is \"/sdcard/Download/\".",
     },
     {
+        .longopt_id = OPT_QUEST_CINEMATIC,
+        .longopt = "quest-cinematic",
+        .text = "Capture native Quest apps with wider FOV at 1920x1080, "
+                "60 fps by default. Requires the installed Meta casting APK. "
+                "Restores FOV on exit. Positional input is disabled.",
+    },
+    {
+        .longopt_id = OPT_QUEST_DISABLE_BOUNDARY,
+        .longopt = "quest-disable-boundary",
+        .text = "Suppress the Quest boundary during this session. "
+                "Restore the previous override on exit. Requires Android 14+.",
+    },
+    {
+        .longopt_id = OPT_QUEST_DISABLE_PROXIMITY,
+        .longopt = "quest-disable-proximity",
+        .text = "Keep the Quest logically worn without its proximity sensor "
+                "during this session. Existing overrides are preserved; "
+                "otherwise restore sensor control on exit. Requires Android 14+.",
+    },
+    {
         .shortopt = 'r',
         .longopt = "record",
         .argdesc = "file.mp4",
@@ -804,6 +828,15 @@ static const struct sc_option options[] = {
         .longopt_id = OPT_RAW_KEY_EVENTS,
         .longopt = "raw-key-events",
         .text = "Inject key events for all input keys, and ignore text events."
+    },
+    {
+        .longopt_id = OPT_RECONNECT,
+        .longopt = "reconnect",
+        .text = "After connection loss, retry the same device every 2 seconds. "
+                "Keep the playback window and its last frame while waiting. "
+                "Close the window or press Ctrl+C to stop. Recordings continue "
+                "in numbered .partNNN files. Initial connection errors do not "
+                "retry. Incompatible with OTG and listing modes.",
     },
     {
         .longopt_id = OPT_RECORD_FORMAT,
@@ -2600,6 +2633,18 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                     return false;
                 }
                 break;
+            case OPT_QUEST_CINEMATIC:
+                opts->quest_cinematic = true;
+                break;
+            case OPT_QUEST_DISABLE_PROXIMITY:
+                opts->quest_disable_proximity = true;
+                break;
+            case OPT_QUEST_DISABLE_BOUNDARY:
+                opts->quest_disable_boundary = true;
+                break;
+            case OPT_RECONNECT:
+                opts->reconnect = true;
+                break;
             case OPT_MAX_FPS:
                 opts->max_fps = optarg;
                 break;
@@ -3073,6 +3118,32 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     if (opts->audio && !opts->audio_playback && !opts->record_filename) {
         LOGI("No audio playback, no recording: audio disabled");
         opts->audio = false;
+    }
+
+    if (opts->reconnect && (otg || opts->list)) {
+        LOGE("--reconnect is incompatible with OTG and listing modes");
+        return false;
+    }
+
+    if (otg && (opts->quest_disable_proximity || opts->quest_disable_boundary)) {
+        LOGE("Quest device switches require ADB and are incompatible with OTG");
+        return false;
+    }
+
+    if (opts->quest_cinematic) {
+        if (!opts->video || otg || opts->video_source != SC_VIDEO_SOURCE_DISPLAY
+                || opts->new_display || opts->display_id || opts->crop
+                || opts->angle || opts->flex_display
+                || opts->capture_orientation != SC_ORIENTATION_0
+                || opts->capture_orientation_lock != SC_ORIENTATION_UNLOCKED) {
+            LOGE("--quest-cinematic requires video on the default display, "
+                 "without camera, virtual display, crop, capture rotation or OTG");
+            return false;
+        }
+        if (!opts->max_fps) {
+            opts->max_fps = "60";
+        }
+        opts->mouse_input_mode = SC_MOUSE_INPUT_MODE_DISABLED;
     }
 
     if (!opts->video && !opts->audio && !opts->control && !otg) {

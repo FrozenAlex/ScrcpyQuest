@@ -305,6 +305,15 @@ execute_server(struct sc_server *server,
     if (params->max_size) {
         ADD_PARAM("max_size=%" PRIu16, params->max_size);
     }
+    if (params->quest_cinematic) {
+        ADD_PARAM("quest_cinematic=true");
+    }
+    if (params->quest_disable_proximity) {
+        ADD_PARAM("quest_disable_proximity=true");
+    }
+    if (params->quest_disable_boundary) {
+        ADD_PARAM("quest_disable_boundary=true");
+    }
     if (params->max_fps) {
         VALIDATE_STRING(params->max_fps);
         ADD_PARAM("max_fps=%s", params->max_fps);
@@ -1145,9 +1154,14 @@ run_server(void *data) {
         net_interrupt(server->control_socket);
     }
 
-    // Give some delay for the server to terminate properly
-#define WATCHDOG_DELAY SC_TICK_FROM_SEC(1)
-    sc_tick deadline = sc_tick_now() + WATCHDOG_DELAY;
+    // Allow the Quest guards to restore FOV and device settings in sequence.
+    bool quest_settings = params->quest_disable_proximity
+                       || params->quest_disable_boundary;
+    sc_tick watchdog_delay = params->quest_cinematic && quest_settings
+                          ? SC_TICK_FROM_SEC(35)
+                          : params->quest_cinematic || quest_settings
+                          ? SC_TICK_FROM_SEC(20) : SC_TICK_FROM_SEC(1);
+    sc_tick deadline = sc_tick_now() + watchdog_delay;
     bool terminated = sc_process_observer_timedwait(&observer, deadline);
 
     // After this delay, kill the server if it's not dead already.

@@ -1,5 +1,4 @@
 src = [
-    'src/main.c',
     'src/adb/adb.c',
     'src/adb/adb_device.c',
     'src/adb/adb_parser.c',
@@ -235,7 +234,7 @@ configure_file(configuration: conf, output: 'config.h')
 
 src_dir = include_directories('src')
 
-executable('scrcpy', src,
+executable('scrcpy', ['src/main.c'] + src,
            dependencies: dependencies,
            include_directories: src_dir,
            install: true,
@@ -310,9 +309,43 @@ if get_option('buildtype') == 'debug'
             'tests/test_device_msg_deserialize.c',
             'src/device_msg.c',
         ]],
+        ['test_demuxer', [
+            'tests/test_demuxer.c',
+            'src/demuxer.c',
+            'src/packet_merger.c',
+            'src/trait/packet_source.c',
+            'src/util/thread.c',
+            'src/util/tick.c',
+            'src/util/log.c',
+            'src/util/str.c',
+            'src/util/strbuf.c',
+            'src/util/term.c',
+        ]],
         ['test_orientation', [
             'tests/test_orientation.c',
             'src/options.c',
+        ]],
+        ['test_recorder_startup', [
+            'tests/test_recorder_startup.c',
+            'src/recorder.c',
+            'src/options.c',
+            'src/util/memory.c',
+            'src/util/thread.c',
+            'src/util/tick.c',
+            'src/util/log.c',
+            'src/util/str.c',
+            'src/util/strbuf.c',
+            'src/util/term.c',
+        ]],
+        ['test_timeout', [
+            'tests/test_timeout.c',
+            'src/util/timeout.c',
+            'src/util/thread.c',
+            'src/util/tick.c',
+            'src/util/log.c',
+            'src/util/str.c',
+            'src/util/strbuf.c',
+            'src/util/term.c',
         ]],
         ['test_strbuf', [
             'tests/test_strbuf.c',
@@ -340,6 +373,15 @@ if get_option('buildtype') == 'debug'
                          c_args: ['-DSC_TEST'])
         test(t[0], exe)
     endforeach
+
+    # Exercise the real screen/renderer and input bindings without a device.
+    screen_test_sources = ['tests/test_screen_reconnect.c'] + src
+    screen_test = executable('test_screen_reconnect', screen_test_sources,
+                             include_directories: src_dir,
+                             dependencies: dependencies,
+                             c_args: ['-DSC_TEST'])
+    test('test_screen_reconnect', screen_test,
+         env: ['SCRCPY_ICON_DIR=' + meson.current_source_dir() / 'data'])
 endif
 
 if meson.version().version_compare('>= 0.58.0')

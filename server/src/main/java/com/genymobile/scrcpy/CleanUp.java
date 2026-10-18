@@ -116,14 +116,15 @@ public final class CleanUp {
         boolean powerOffScreen = options.getPowerOffScreenOnClose();
 
         try {
-            run(displayId, restoreStayOn, disableShowTouches, powerOffScreen, restoreScreenOffTimeout, restoreDisplayImePolicy);
+            run(displayId, restoreStayOn, disableShowTouches, powerOffScreen, restoreScreenOffTimeout, restoreDisplayImePolicy,
+                    options.getQuestCinematic() || options.getQuestDeviceSettings());
         } catch (IOException e) {
             Ln.e("Clean up I/O exception", e);
         }
     }
 
     private void run(int displayId, int restoreStayOn, boolean disableShowTouches, boolean powerOffScreen, int restoreScreenOffTimeout,
-            int restoreDisplayImePolicy) throws IOException {
+            int restoreDisplayImePolicy, boolean keepServer) throws IOException {
         String[] cmd = {
                 "app_process",
                 "/",
@@ -134,6 +135,7 @@ public final class CleanUp {
                 String.valueOf(powerOffScreen),
                 String.valueOf(restoreScreenOffTimeout),
                 String.valueOf(restoreDisplayImePolicy),
+                String.valueOf(keepServer),
         };
 
         ProcessBuilder builder = new ProcessBuilder(cmd);
@@ -192,7 +194,26 @@ public final class CleanUp {
         } catch (ErrnoException e) {
             Ln.e("setsid() failed", e);
         }
-        unlinkSelf();
+        if (args.length > 0 && ("--quest-cinematic".equals(args[0]) || "--quest-device-settings".equals(args[0]))) {
+            prepareMainLooper();
+            Workarounds.apply();
+            try {
+                if ("--quest-cinematic".equals(args[0])) {
+                    com.genymobile.scrcpy.quest.QuestCleanup.run(args);
+                } else {
+                    com.genymobile.scrcpy.quest.QuestDeviceSession.run(args);
+                }
+                System.exit(0);
+            } catch (Exception e) {
+                Ln.e("Quest cleanup failed", e);
+                System.exit(1);
+            }
+            return;
+        }
+        boolean keepServer = args.length > 6 && Boolean.parseBoolean(args[6]);
+        if (!keepServer) {
+            unlinkSelf();
+        }
 
         // Needed for workarounds
         prepareMainLooper();
@@ -218,6 +239,10 @@ public final class CleanUp {
             }
         } catch (IOException e) {
             // Expected when the server is dead
+        }
+
+        if (keepServer) {
+            unlinkSelf();
         }
 
         Ln.i("Cleaning up");

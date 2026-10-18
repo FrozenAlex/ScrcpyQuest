@@ -376,6 +376,27 @@ static void test_remove_trailing_cr(void) {
     assert(!strcmp(s3, "adb\rdef"));
 }
 
+static void test_insert_before_extension(void) {
+    const char *paths[][2] = {
+        {"quest.mp4", "quest.part002.mp4"},
+        {"quest.capture.MKV", "quest.capture.part002.MKV"},
+        {"dir.with.dots/quest", "dir.with.dots/quest.part002"},
+        {"/tmp/.capture", "/tmp/.capture.part002"},
+        {"/tmp/.capture.mkv", "/tmp/.capture.part002.mkv"},
+        {"recordings/my game.mp4", "recordings/my game.part002.mp4"},
+#ifdef _WIN32
+        {"C:\\dir.mp4\\quest", "C:\\dir.mp4\\quest.part002"},
+        {"C:\\dir.mp4\\quest.mkv", "C:\\dir.mp4\\quest.part002.mkv"},
+#endif
+    };
+    for (size_t i = 0; i < ARRAY_LEN(paths); ++i) {
+        char *result = sc_str_insert_before_extension(paths[i][0], ".part002");
+        assert(result);
+        assert(!strcmp(result, paths[i][1]));
+        free(result);
+    }
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
@@ -397,5 +418,6 @@ int main(int argc, char *argv[]) {
     test_wrap_lines();
     test_index_of_column();
     test_remove_trailing_cr();
+    test_insert_before_extension();
     return 0;
 }

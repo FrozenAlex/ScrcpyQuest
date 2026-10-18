@@ -147,4 +147,10 @@ sc_str_remove_trailing_cr(char *s, size_t len);
 char *
 sc_str_to_hex_string(const uint8_t *data, size_t len);
 
+/** Insert a suffix before a filename extension, or append if absent.
+ * The caller owns the result. Directory dots and dotfiles are ignored.
+ */
+char *
+sc_str_insert_before_extension(const char *path, const char *suffix);
+
 #endif

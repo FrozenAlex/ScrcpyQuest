@@ -73,7 +73,7 @@ public class SurfaceEncoder implements AsyncProcessor {
     private void streamCapture() throws IOException, ConfigurationException {
         Codec codec = streamer.getCodec();
         MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
-        MediaFormat format = createFormat(codec.getMimeType(), videoBitRate, maxFps, codecOptions);
+        MediaFormat format = createFormat(codec.getMimeType(), videoBitRate, maxFps, codecOptions, capture.getFrameTimeoutMs() == 0);
 
         MediaCodecInfo.VideoCapabilities caps;
         int alignment;
@@ -94,9 +94,8 @@ public class SurfaceEncoder implements AsyncProcessor {
         // Do not constrain by the declared video encoder capabilities before encoding actually fails
         videoConstraints = new VideoConstraints(maxSize, alignment, null);
 
-        capture.init(captureControl, videoConstraints);
-
         try {
+            capture.init(captureControl, videoConstraints);
             boolean alive;
 
             streamer.writeVideoHeader();
@@ -183,8 +182,11 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
             } while (alive);
         } finally {
-            mediaCodec.release();
-            capture.release();
+            try {
+                mediaCodec.release();
+            } finally {
+                capture.release();
+            }
         }
     }
 
@@ -252,9 +254,14 @@ public class SurfaceEncoder implements AsyncProcessor {
     private void encode(MediaCodec codec, Streamer streamer) throws IOException {
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
 
+        long timeout = capture.getFrameTimeoutMs();
+        long lastFrame = SystemClock.elapsedRealtime();
         boolean eos;
         do {
-            int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, -1);
+            int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, timeout > 0 ? 100000 : -1);
+            if (timeout > 0 && SystemClock.elapsedRealtime() - lastFrame > timeout) {
+                throw new IOException("Quest capture produced no frames for " + timeout + "ms");
+            }
             try {
                 eos = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
                 // On EOS, there might be data or not, depending on bufferInfo.size
@@ -262,6 +269,7 @@ public class SurfaceEncoder implements AsyncProcessor {
                     boolean isConfig = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
                     if (!isConfig) {
                         // If this is not a config packet, then it contains a frame
+                        lastFrame = SystemClock.elapsedRealtime();
                         firstFrameSent = true;
                         consecutiveErrors = 0;
                     }
@@ -307,7 +315,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         }
     }
 
-    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, List<CodecOption> codecOptions) {
+    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, List<CodecOption> codecOptions, boolean repeatFrames) {
         MediaFormat format = new MediaFormat();
         format.setString(MediaFormat.KEY_MIME, videoMimeType);
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
@@ -319,7 +327,10 @@ public class SurfaceEncoder implements AsyncProcessor {
         }
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, DEFAULT_I_FRAME_INTERVAL);
         // display the very first frame, and recover from bad quality when no new frames
-        format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, REPEAT_FRAME_DELAY_US); // µs
+        if (repeatFrames) {
+            // Repetition would hide a stalled producer from captures which enforce a frame timeout.
+            format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, REPEAT_FRAME_DELAY_US); // µs
+        }
         if (Build.VERSION.SDK_INT >= AndroidVersions.API_23_ANDROID_6_0) {
             // real-time priority
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);

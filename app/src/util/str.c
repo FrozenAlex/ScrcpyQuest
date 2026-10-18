@@ -358,3 +358,36 @@ sc_str_to_hex_string(const uint8_t *data, size_t size) {
 
     return buffer;
 }
+
+char *
+sc_str_insert_before_extension(const char *path, const char *suffix) {
+    const char *name = path;
+    for (const char *p = path; *p; ++p) {
+        if (*p == '/'
+#ifdef _WIN32
+                || *p == '\\'
+#endif
+                ) {
+            name = p + 1;
+        }
+    }
+    const char *extension = strrchr(name, '.');
+    if (!extension || extension == name) {
+        extension = path + strlen(path);
+    }
+    size_t prefix_len = extension - path;
+    size_t suffix_len = strlen(suffix);
+    size_t path_len = strlen(path);
+    if (suffix_len >= SIZE_MAX - path_len) {
+        return NULL;
+    }
+    size_t length = path_len + suffix_len;
+    char *result = malloc(length + 1);
+    if (!result) {
+        return NULL;
+    }
+    memcpy(result, path, prefix_len);
+    memcpy(result + prefix_len, suffix, suffix_len);
+    strcpy(result + prefix_len + suffix_len, extension);
+    return result;
+}

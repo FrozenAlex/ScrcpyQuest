@@ -53,7 +53,7 @@
 
 struct scrcpy {
     struct sc_server server;
-    struct sc_screen screen;
+    struct sc_screen *screen;
     struct sc_audio_player audio_player;
     struct sc_demuxer video_demuxer;
     struct sc_demuxer audio_demuxer;
@@ -109,11 +109,16 @@ static BOOL WINAPI windows_ctrl_handler(DWORD ctrl_type) {
 
 static void
 sdl_configure_ctrl_c_windows(void) {
+    static bool configured;
+    if (configured) {
+        return;
+    }
     // Clean up properly on Ctrl+C on Windows
     bool ok = SetConsoleCtrlHandler(windows_ctrl_handler, TRUE);
     if (!ok) {
         LOGW("Could not set Ctrl+C handler");
     }
+    configured = ok;
 }
 #endif // _WIN32
 
@@ -125,7 +130,7 @@ event_loop(struct scrcpy *s, bool has_screen) {
             case SC_EVENT_DEVICE_DISCONNECTED:
                 LOGW("Device disconnected");
                 if (has_screen) {
-                    sc_screen_handle_event(&s->screen, &event);
+                    sc_screen_handle_event(s->screen, &event);
                 }
                 return SCRCPY_EXIT_DISCONNECTED;
             case SC_EVENT_DEMUXER_ERROR:
@@ -146,12 +151,13 @@ event_loop(struct scrcpy *s, bool has_screen) {
             case SC_EVENT_TIME_LIMIT_REACHED:
                 LOGI("Time limit reached");
                 return SCRCPY_EXIT_SUCCESS;
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             case SDL_EVENT_QUIT:
                 LOGD("User requested to quit");
                 return SCRCPY_EXIT_SUCCESS;
             default:
                 if (has_screen) {
-                    sc_screen_handle_event(&s->screen, &event);
+                    sc_screen_handle_event(s->screen, &event);
                 }
                 break;
         }
@@ -161,10 +167,11 @@ event_loop(struct scrcpy *s, bool has_screen) {
 
 // Return true on success, false on error
 static bool
-await_for_server(bool *connected) {
+await_for_server(bool *connected, struct sc_screen *screen) {
     SDL_Event event;
     while (SDL_WaitEvent(&event)) {
         switch (event.type) {
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             case SDL_EVENT_QUIT:
                 if (connected) {
                     *connected = false;
@@ -178,6 +185,9 @@ await_for_server(bool *connected) {
                 }
                 return true;
             default:
+                if (screen) {
+                    sc_screen_handle_event(screen, &event);
+                }
                 break;
         }
     }
@@ -197,12 +207,12 @@ sc_decoder_on_ended(struct sc_decoder *decoder, bool success, void *userdata) {
 }
 
 static void
-sc_recorder_on_ended(struct sc_recorder *recorder, bool success,
+sc_recorder_on_ended(struct sc_recorder *recorder, enum sc_recorder_status status,
                      void *userdata) {
     (void) recorder;
     (void) userdata;
 
-    if (!success) {
+    if (status == SC_RECORDER_STATUS_ERROR) {
         sc_push_event(SC_EVENT_RECORDER_ERROR);
     }
 }
@@ -374,21 +384,23 @@ sc_init_video_hwdec(struct sc_hwdec *hwdec, enum sc_hwdec_mode mode,
 }
 
 enum scrcpy_exit_code
-scrcpy(struct scrcpy_options *options) {
+scrcpy(struct scrcpy_options *options, char **connected_serial,
+       struct sc_screen **retained_screen) {
     static struct scrcpy scrcpy;
 #ifndef NDEBUG
     // Detect missing initializations
     memset(&scrcpy, 42, sizeof(scrcpy));
+#else
+    memset(&scrcpy, 0, sizeof(scrcpy));
 #endif
     struct scrcpy *s = &scrcpy;
+    s->screen = *retained_screen;
 
     // Minimal SDL initialization
-    if (!SDL_Init(SDL_INIT_EVENTS)) {
+    if (!SDL_WasInit(SDL_INIT_EVENTS) && !SDL_Init(SDL_INIT_EVENTS)) {
         LOGE("Could not initialize SDL: %s", SDL_GetError());
         return SCRCPY_EXIT_FAILURE;
     }
-
-    atexit(SDL_Quit);
 
     enum scrcpy_exit_code ret = SCRCPY_EXIT_FAILURE;
 
@@ -416,7 +428,8 @@ scrcpy(struct scrcpy_options *options) {
 #endif
     bool controller_initialized = false;
     bool controller_started = false;
-    bool screen_initialized = false;
+    bool screen_initialized = s->screen != NULL;
+    bool keep_screen = false;
     bool timeout_initialized = false;
     bool timeout_started = false;
     bool disconnected = false;
@@ -445,6 +458,9 @@ scrcpy(struct scrcpy_options *options) {
         .video_bit_rate = options->video_bit_rate,
         .audio_bit_rate = options->audio_bit_rate,
         .max_fps = options->max_fps,
+        .quest_cinematic = options->quest_cinematic,
+        .quest_disable_proximity = options->quest_disable_proximity,
+        .quest_disable_boundary = options->quest_disable_boundary,
         .angle = options->angle,
         .screen_off_timeout = options->screen_off_timeout,
         .capture_orientation = options->capture_orientation,
@@ -511,7 +527,7 @@ scrcpy(struct scrcpy_options *options) {
     server_started = true;
 
     if (options->list) {
-        bool ok = await_for_server(NULL);
+        bool ok = await_for_server(NULL, s->screen);
         ret = ok ? SCRCPY_EXIT_SUCCESS : SCRCPY_EXIT_FAILURE;
         goto end;
     }
@@ -526,7 +542,7 @@ scrcpy(struct scrcpy_options *options) {
         // --no-video-playback is passed so that clipboard synchronization
         // still works.
         // <https://github.com/Genymobile/scrcpy/issues/4418>
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
+        if (!SDL_WasInit(SDL_INIT_VIDEO) && !SDL_Init(SDL_INIT_VIDEO)) {
             // If it fails, it is an error only if video playback is enabled
             if (options->video_playback) {
                 LOGE("Could not initialize SDL video: %s", SDL_GetError());
@@ -538,14 +554,14 @@ scrcpy(struct scrcpy_options *options) {
     }
 
     if (options->audio_playback) {
-        if (!SDL_Init(SDL_INIT_AUDIO)) {
+        if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_Init(SDL_INIT_AUDIO)) {
             LOGE("Could not initialize SDL audio: %s", SDL_GetError());
             goto end;
         }
     }
 
     if (options->gamepad_input_mode != SC_GAMEPAD_INPUT_MODE_DISABLED) {
-        if (!SDL_Init(SDL_INIT_GAMEPAD)) {
+        if (!SDL_WasInit(SDL_INIT_GAMEPAD) && !SDL_Init(SDL_INIT_GAMEPAD)) {
             LOGE("Could not initialize SDL gamepad: %s", SDL_GetError());
             goto end;
         }
@@ -553,8 +569,9 @@ scrcpy(struct scrcpy_options *options) {
 
     // Await for server without blocking Ctrl+C handling
     bool connected;
-    if (!await_for_server(&connected)) {
+    if (!await_for_server(&connected, s->screen)) {
         LOGE("Server connection failed");
+        ret = SCRCPY_EXIT_CONNECTION_FAILED;
         goto end;
     }
 
@@ -580,6 +597,14 @@ scrcpy(struct scrcpy_options *options) {
 
     const char *serial = s->server.serial;
     assert(serial);
+
+    if (connected_serial && !*connected_serial) {
+        *connected_serial = strdup(serial);
+        if (!*connected_serial) {
+            LOG_OOM();
+            goto end;
+        }
+    }
 
     struct sc_file_pusher *fp = NULL;
 
@@ -814,6 +839,7 @@ aoa_complete:
 
     if (options->window) {
         struct sc_screen_params screen_params = {
+            .reconnect = options->reconnect,
             .video = options->video_playback,
             .camera = options->video_source == SC_VIDEO_SOURCE_CAMERA,
             .flex_display = options->flex_display,
@@ -843,10 +869,22 @@ aoa_complete:
             .start_fps_counter = options->start_fps_counter,
         };
 
-        if (!sc_screen_init(&s->screen, &screen_params)) {
-            goto end;
+        if (s->screen) {
+            sc_screen_reconnect(s->screen, &screen_params);
+        } else {
+            s->screen = malloc(sizeof(*s->screen));
+            if (!s->screen) {
+                LOG_OOM();
+                goto end;
+            }
+            if (!sc_screen_init(s->screen, &screen_params)) {
+                free(s->screen);
+                s->screen = NULL;
+                goto end;
+            }
+            *retained_screen = s->screen;
+            screen_initialized = true;
         }
-        screen_initialized = true;
     }
 
     bool needs_video_decoder = options->video_playback;
@@ -855,7 +893,7 @@ aoa_complete:
     needs_video_decoder |= !!options->v4l2_device;
 #endif
     if (needs_video_decoder) {
-        struct sc_screen *screen = options->video_playback ? &s->screen : NULL;
+        struct sc_screen *screen = options->video_playback ? s->screen : NULL;
         assert(!screen || screen_initialized);
 
         if (!sc_init_video_hwdec(&s->hwdec, options->hwdec_mode, screen)) {
@@ -921,7 +959,7 @@ aoa_complete:
             src = &s->video_regulator.frame_source;
         }
 
-        sc_frame_source_add_sink(src, &s->screen.frame_sink);
+        sc_frame_source_add_sink(src, &s->screen->frame_sink);
     }
 
     if (options->audio_playback) {
@@ -1038,13 +1076,14 @@ aoa_complete:
 
     ret = event_loop(s, options->window);
 
-    // Reject all new runnables, and execute the pending ones now
-    // (they could access memory that will be cleaned up below)
-    sc_main_thread_stop();
-
     disconnected = ret == SCRCPY_EXIT_DISCONNECTED;
 
 end:
+    keep_screen = options->reconnect
+               && (ret == SCRCPY_EXIT_DISCONNECTED
+                   || ret == SCRCPY_EXIT_CONNECTION_FAILED);
+    // Also reject callbacks on failed startup before releasing their targets.
+    sc_main_thread_stop();
     if (timeout_started) {
         sc_timeout_stop(&s->timeout);
     }
@@ -1080,8 +1119,8 @@ end:
     if (recorder_initialized) {
         sc_recorder_stop(&s->recorder);
     }
-    if (screen_initialized) {
-        sc_screen_interrupt(&s->screen);
+    if (screen_initialized && !keep_screen) {
+        sc_screen_interrupt(s->screen);
     }
 
     if (server_started) {
@@ -1089,15 +1128,17 @@ end:
         sc_server_stop(&s->server);
     }
 
-    if (screen_initialized) {
+    if (screen_initialized && !keep_screen) {
         if (disconnected) {
-            sc_screen_handle_disconnection(&s->screen);
+            if (sc_screen_handle_disconnection(s->screen)) {
+                ret = SCRCPY_EXIT_SUCCESS;
+            }
         }
         LOGD("Quit...");
 
         // Close the window immediately, because sc_screen_destroy() may only be
         // called once the video decoder thread is joined (it may take time)
-        sc_screen_hide_window(&s->screen);
+        sc_screen_hide_window(s->screen);
     }
 
     if (video_decoder_started) {
@@ -1178,8 +1219,14 @@ end:
     // finished, because otherwise the screen could receive new frames after
     // destruction
     if (screen_initialized) {
-        sc_screen_join(&s->screen);
-        sc_screen_destroy(&s->screen);
+        if (keep_screen) {
+            sc_screen_suspend(s->screen);
+        } else {
+            sc_screen_join(s->screen);
+            sc_screen_destroy(s->screen);
+            free(s->screen);
+            *retained_screen = NULL;
+        }
     }
 
     if (controller_started) {

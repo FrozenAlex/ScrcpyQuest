@@ -5,6 +5,9 @@ build/
 /release-*/
 .idea/
 .gradle/
+.cxx/
 /x/
 local.properties
 /scrcpy-server
+__pycache__/
+*.py[cod]

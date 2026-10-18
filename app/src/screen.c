@@ -369,7 +369,7 @@ sc_screen_on_resize(struct sc_screen *screen, const SDL_WindowEvent *event) {
         sc_screen_render(screen, true);
     } else {
         assert(event->type == SDL_EVENT_WINDOW_RESIZED);
-        if (screen->flex_display) {
+        if (screen->flex_display && !screen->disconnected) {
             assert(!(event->data1 & ~0xFFFF));
             assert(!(event->data2 & ~0xFFFF));
             uint16_t width = event->data1;
@@ -410,8 +410,9 @@ event_watcher(void *data, SDL_Event *event) {
     struct sc_screen *screen = data;
     assert(screen->video);
 
-    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
-            || event->type == SDL_EVENT_WINDOW_RESIZED) {
+    if (screen->window_shown
+            && (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
+                || event->type == SDL_EVENT_WINDOW_RESIZED)) {
         // In practice, it seems to always be called from the same thread in
         // that specific case. Anyway, it's just a workaround.
         sc_screen_on_resize(screen, &event->window);
@@ -514,6 +515,27 @@ sc_screen_frame_sink_push_session(struct sc_frame_sink *sink,
     return SC_SINK_OK;
 }
 
+static void
+sc_screen_bind_input(struct sc_screen *screen,
+                      const struct sc_screen_params *params) {
+    screen->controller = params->controller;
+    struct sc_input_manager_params im_params = {
+        .controller = params->controller,
+        .fp = params->fp,
+        .screen = screen,
+        .kp = params->kp,
+        .mp = params->mp,
+        .gp = params->gp,
+        .camera = params->camera,
+        .mouse_bindings = params->mouse_bindings,
+        .legacy_paste = params->legacy_paste,
+        .clipboard_autosync = params->clipboard_autosync,
+        .shortcut_mods = params->shortcut_mods,
+    };
+
+    sc_input_manager_init(&screen->im, &im_params);
+}
+
 bool
 sc_screen_init(struct sc_screen *screen,
                const struct sc_screen_params *params) {
@@ -525,6 +547,7 @@ sc_screen_init(struct sc_screen *screen,
     screen->resume_frame = NULL;
     screen->orientation = SC_ORIENTATION_0;
     screen->disconnected = false;
+    screen->reconnect = params->reconnect;
     screen->disconnect_started = false;
 
     screen->video = params->video;
@@ -691,21 +714,7 @@ sc_screen_init(struct sc_screen *screen,
         goto error_destroy_texture;
     }
 
-    struct sc_input_manager_params im_params = {
-        .controller = params->controller,
-        .fp = params->fp,
-        .screen = screen,
-        .kp = params->kp,
-        .mp = params->mp,
-        .gp = params->gp,
-        .camera = params->camera,
-        .mouse_bindings = params->mouse_bindings,
-        .legacy_paste = params->legacy_paste,
-        .clipboard_autosync = params->clipboard_autosync,
-        .shortcut_mods = params->shortcut_mods,
-    };
-
-    sc_input_manager_init(&screen->im, &im_params);
+    sc_screen_bind_input(screen, params);
 
     // Initialize even if not used for simplicity
     sc_mouse_capture_init(&screen->mc, screen->window, params->shortcut_mods);
@@ -767,6 +776,38 @@ error_destroy_mutex:
     sc_mutex_destroy(&screen->mutex);
 
     return false;
+}
+
+void
+sc_screen_suspend(struct sc_screen *screen) {
+    // All producers have joined. Keep the displayed frame but discard any
+    // queued frame and its notification before a new producer opens the sink.
+    av_frame_unref(screen->fb.pending_frame);
+    screen->fb.pending_frame_consumed = true;
+    SDL_Event event;
+    while (sc_dequeue_event(SC_EVENT_OPEN_WINDOW, &event)) {
+        free(event.user.data1);
+    }
+    SDL_FlushEvent(SC_EVENT_NEW_FRAME);
+    screen->disconnected = true;
+    screen->controller = NULL;
+    sc_mouse_capture_set_active(&screen->mc, false);
+    SDL_SetWindowTitle(screen->window, "scrcpy (reconnecting...)");
+    LOGD("Retaining playback window %u during reconnection",
+         (unsigned) SDL_GetWindowID(screen->window));
+}
+
+void
+sc_screen_reconnect(struct sc_screen *screen,
+                    const struct sc_screen_params *params) {
+    assert(screen->disconnected);
+    sc_screen_bind_input(screen, params);
+    sc_mouse_capture_init(&screen->mc, screen->window, params->shortcut_mods);
+    screen->disconnected = false;
+    screen->resize_tracker.time = 0;
+    SDL_SetWindowTitle(screen->window, params->window_title);
+    LOGD("Resuming playback in window %u",
+         (unsigned) SDL_GetWindowID(screen->window));
 }
 
 static void
@@ -838,6 +879,11 @@ sc_screen_join(struct sc_screen *screen) {
 
 void
 sc_screen_destroy(struct sc_screen *screen) {
+#ifdef CONTINUOUS_RESIZING_WORKAROUND
+    if (screen->video) {
+        SDL_RemoveEventWatch(event_watcher, screen);
+    }
+#endif
 #ifndef NDEBUG
     assert(!screen->open);
 #endif
@@ -846,6 +892,8 @@ sc_screen_destroy(struct sc_screen *screen) {
     }
     sc_texture_destroy(&screen->tex);
     av_frame_free(&screen->frame);
+    av_frame_free(&screen->resume_frame);
+    SDL_DestroyTexture(screen->icon_tex);
 #ifdef SC_DISPLAY_FORCE_OPENGL_CORE_PROFILE
     SDL_GL_DestroyContext(screen->gl_context);
 #endif
@@ -1170,6 +1218,19 @@ sc_disconnect_on_timeout(struct sc_disconnect *d, void *userdata) {
 
 void
 sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
+    if (screen->reconnect && screen->disconnected) {
+        // Session input objects have been destroyed. Only process local window
+        // events while waiting, never inject input into the previous session.
+        if (event->type < SDL_EVENT_WINDOW_FIRST
+                || event->type > SDL_EVENT_WINDOW_LAST) {
+            return;
+        }
+    }
+    if (!screen->window_shown
+            && event->type >= SDL_EVENT_WINDOW_FIRST
+            && event->type <= SDL_EVENT_WINDOW_LAST) {
+        return;
+    }
     switch (event->type) {
         case SC_EVENT_OPEN_WINDOW: {
             struct sc_size *size = event->user.data1;
@@ -1179,7 +1240,10 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
             free(size);
             screen->content_size = get_oriented_size(screen->frame_size,
                                                      screen->orientation);
-            sc_screen_show_initial_window(screen);
+            if (!screen->window_shown) {
+                sc_screen_show_initial_window(screen);
+            }
+            sc_screen_update_content_rect(screen);
 
             if (sc_screen_is_relative_mode(screen)) {
                 // Capture mouse on start
@@ -1232,6 +1296,12 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
                 return;
             }
 
+            if (screen->reconnect) {
+                sc_mouse_capture_set_active(&screen->mc, false);
+                SDL_SetWindowTitle(screen->window, "scrcpy (reconnecting...)");
+                return;
+            }
+
             sc_input_manager_handle_event(&screen->im, event);
 
             sc_texture_reset(&screen->tex);
@@ -1251,6 +1321,10 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
             return;
     }
 
+    if (screen->reconnect && screen->disconnected) {
+        return;
+    }
+
     if (sc_screen_is_relative_mode(screen)
             && sc_mouse_capture_handle_event(&screen->mc, event)) {
         // The mouse capture handler consumed the event
@@ -1260,16 +1334,16 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     sc_input_manager_handle_event(&screen->im, event);
 }
 
-void
+bool
 sc_screen_handle_disconnection(struct sc_screen *screen) {
     if (!screen->window_shown) {
         // No window open, quit immediately
-        return;
+        return false;
     }
 
     if (!screen->disconnect_started) {
         // If sc_disconnect_start() failed, quit immediately
-        return;
+        return false;
     }
 
     SDL_Event event;
@@ -1298,15 +1372,27 @@ sc_screen_handle_disconnection(struct sc_screen *screen) {
             }
             case SC_EVENT_DISCONNECTED_TIMEOUT:
                 LOGD("Closing after device disconnection");
-                return;
+                return false;
+            case SC_EVENT_DEMUXER_ERROR:
+            case SC_EVENT_DECODER_ERROR:
+            case SC_EVENT_RECORDER_ERROR:
+            case SC_EVENT_CONTROLLER_ERROR:
+            case SC_EVENT_AOA_OPEN_ERROR:
+                // Preserve a fatal error which raced the socket disconnection
+                // so the session runner will not retry it after cleanup.
+                sc_push_event_impl(event.type, NULL, "fatal stream error");
+                return false;
+            case SC_EVENT_TIME_LIMIT_REACHED:
+                return true;
             case SDL_EVENT_QUIT:
                 LOGD("User requested to quit");
                 sc_screen_interrupt_disconnect(screen);
-                return;
+                return true;
             default:
                 sc_input_manager_handle_event(&screen->im, &event);
         }
     }
+    return false;
 }
 
 struct sc_point

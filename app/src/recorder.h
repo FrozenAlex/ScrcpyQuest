@@ -63,8 +63,14 @@ struct sc_recorder {
     void *cbs_userdata;
 };
 
+enum sc_recorder_status {
+    SC_RECORDER_STATUS_SUCCESS,
+    SC_RECORDER_STATUS_STOPPED,
+    SC_RECORDER_STATUS_ERROR,
+};
+
 struct sc_recorder_callbacks {
-    void (*on_ended)(struct sc_recorder *recorder, bool success,
+    void (*on_ended)(struct sc_recorder *recorder, enum sc_recorder_status status,
                      void *userdata);
 };
 

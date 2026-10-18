@@ -188,7 +188,7 @@ sc_recorder_must_wait_for_config_packets(struct sc_recorder *recorder) {
     return false;
 }
 
-static bool
+static enum sc_recorder_status
 sc_recorder_process_header(struct sc_recorder *recorder) {
     sc_mutex_lock(&recorder->mutex);
 
@@ -199,13 +199,16 @@ sc_recorder_process_header(struct sc_recorder *recorder) {
         sc_cond_wait(&recorder->cond, &recorder->mutex);
     }
 
-    if (recorder->stopped && recorder->video
-            && sc_vecdeque_is_empty(&recorder->video_queue)) {
-        // If the recorder is stopped, don't process anything if there are not
-        // at least video packets
+    if (recorder->stopped
+            && ((recorder->video && !recorder->video_init)
+                || (recorder->audio && !recorder->audio_init)
+                || sc_recorder_must_wait_for_config_packets(recorder)
+                || (recorder->video
+                    && sc_vecdeque_is_empty(&recorder->video_queue)))) {
+        // Connection loss or cancellation before initialization is not a
+        // recording error and must not prevent reconnection.
         sc_mutex_unlock(&recorder->mutex);
-        LOGW("Recording stopped before headers were processed");
-        return false;
+        return SC_RECORDER_STATUS_STOPPED;
     }
 
     AVPacket *video_pkt = NULL;
@@ -224,7 +227,7 @@ sc_recorder_process_header(struct sc_recorder *recorder) {
 
     sc_mutex_unlock(&recorder->mutex);
 
-    int ret = false;
+    enum sc_recorder_status ret = SC_RECORDER_STATUS_ERROR;
 
     if (video_pkt) {
         if (video_pkt->pts != AV_NOPTS_VALUE) {
@@ -262,7 +265,7 @@ sc_recorder_process_header(struct sc_recorder *recorder) {
         goto end;
     }
 
-    ret = true;
+    ret = SC_RECORDER_STATUS_SUCCESS;
 
 end:
     if (video_pkt) {
@@ -275,13 +278,13 @@ end:
     return ret;
 }
 
-static bool
+static enum sc_recorder_status
 sc_recorder_process_packets(struct sc_recorder *recorder) {
     int64_t pts_origin = AV_NOPTS_VALUE;
 
-    bool header_written = sc_recorder_process_header(recorder);
-    if (!header_written) {
-        return false;
+    enum sc_recorder_status status = sc_recorder_process_header(recorder);
+    if (status != SC_RECORDER_STATUS_SUCCESS) {
+        return status;
     }
 
     AVPacket *video_pkt = NULL;
@@ -448,19 +451,7 @@ end:
         av_packet_free(&audio_pkt);
     }
 
-    return !error;
-}
-
-static bool
-sc_recorder_record(struct sc_recorder *recorder) {
-    bool ok = sc_recorder_open_output_file(recorder);
-    if (!ok) {
-        return false;
-    }
-
-    ok = sc_recorder_process_packets(recorder);
-    sc_recorder_close_output_file(recorder);
-    return ok;
+    return error ? SC_RECORDER_STATUS_ERROR : SC_RECORDER_STATUS_SUCCESS;
 }
 
 static int
@@ -471,7 +462,7 @@ run_recorder(void *data) {
     bool ok = sc_thread_set_priority(SC_THREAD_PRIORITY_LOW);
     (void) ok; // We don't care if it worked
 
-    bool success = sc_recorder_record(recorder);
+    enum sc_recorder_status status = sc_recorder_process_packets(recorder);
 
     sc_mutex_lock(&recorder->mutex);
     // Prevent the producer from pushing any new packet
@@ -481,17 +472,23 @@ run_recorder(void *data) {
     sc_recorder_queue_clear(&recorder->audio_queue);
     sc_mutex_unlock(&recorder->mutex);
 
-    if (success) {
+    // Packet sinks must observe stopped before the shared context is freed.
+    sc_recorder_close_output_file(recorder);
+
+    if (status == SC_RECORDER_STATUS_SUCCESS) {
         const char *format_name = sc_recorder_get_format_name(recorder->format);
         LOGI("Recording complete to %s file: %s", format_name,
                                                   recorder->filename);
+    } else if (status == SC_RECORDER_STATUS_STOPPED) {
+        LOGW("Recording stopped before headers were processed: %s",
+             recorder->filename);
     } else {
         LOGE("Recording failed to %s", recorder->filename);
     }
 
     LOGD("Recorder thread ended");
 
-    recorder->cbs->on_ended(recorder, success, recorder->cbs_userdata);
+    recorder->cbs->on_ended(recorder, status, recorder->cbs_userdata);
 
     return 0;
 }
@@ -647,6 +644,11 @@ sc_recorder_audio_packet_sink_open(struct sc_packet_sink *sink,
     assert(!recorder->audio_init);
 
     sc_mutex_lock(&recorder->mutex);
+
+    if (recorder->stopped) {
+        sc_mutex_unlock(&recorder->mutex);
+        return false;
+    }
 
     AVStream *stream = avformat_new_stream(recorder->ctx, NULL);
     if (!stream) {
@@ -828,9 +830,16 @@ error_free_filename:
 
 bool
 sc_recorder_start(struct sc_recorder *recorder) {
+    // Initialize the output before any demuxer can open its packet sink.
+    // The recorder thread may otherwise lose the race to incoming frames.
+    if (!sc_recorder_open_output_file(recorder)) {
+        return false;
+    }
+
     bool ok = sc_thread_create(&recorder->thread, run_recorder,
                                "scrcpy-recorder", recorder);
     if (!ok) {
+        sc_recorder_close_output_file(recorder);
         LOGE("Could not start recorder thread");
         return false;
     }

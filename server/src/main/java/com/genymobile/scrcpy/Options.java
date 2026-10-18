@@ -24,6 +24,9 @@ public class Options {
 
     private Ln.Level logLevel = Ln.Level.DEBUG;
     private int scid = -1; // 31-bit non-negative value, or -1
+    private boolean questCinematic;
+    private boolean questDisableProximity;
+    private boolean questDisableBoundary;
     private boolean video = true;
     private boolean audio = true;
     private int maxSize;
@@ -93,6 +96,22 @@ public class Options {
 
     public int getScid() {
         return scid;
+    }
+
+    public boolean getQuestCinematic() {
+        return questCinematic;
+    }
+
+    public boolean getQuestDisableProximity() {
+        return questDisableProximity;
+    }
+
+    public boolean getQuestDisableBoundary() {
+        return questDisableBoundary;
+    }
+
+    public boolean getQuestDeviceSettings() {
+        return questDisableProximity || questDisableBoundary;
     }
 
     public boolean getVideo() {
@@ -404,6 +423,15 @@ public class Options {
                     break;
                 case "audio_bit_rate":
                     options.audioBitRate = Integer.parseInt(value);
+                    break;
+                case "quest_cinematic":
+                    options.questCinematic = Boolean.parseBoolean(value);
+                    break;
+                case "quest_disable_proximity":
+                    options.questDisableProximity = Boolean.parseBoolean(value);
+                    break;
+                case "quest_disable_boundary":
+                    options.questDisableBoundary = Boolean.parseBoolean(value);
                     break;
                 case "max_fps":
                     options.maxFps = parseFloat("max_fps", value);

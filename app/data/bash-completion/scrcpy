@@ -79,6 +79,10 @@ _scrcpy() {
         --pause-on-exit=
         --power-off-on-close
         --prefer-text
+        --quest-cinematic
+        --quest-disable-boundary
+        --quest-disable-proximity
+        --reconnect
         --print-fps
         --push-target=
         -r --record=

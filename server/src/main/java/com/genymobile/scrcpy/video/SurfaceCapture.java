@@ -66,10 +66,15 @@ public abstract class SurfaceCapture {
      */
     public abstract Size getSize();
 
+    /** Return the maximum interval without frames, or zero to wait indefinitely. */
+    public long getFrameTimeoutMs() {
+        return 0;
+    }
+
     /**
      * Indicate if the capture has been closed internally.
      *
-     * @return {@code true} is the capture is closed, {@code false} otherwise.
+     * @return {@code true} if the capture is closed, {@code false} otherwise.
      */
     public boolean isClosed() {
         return false;

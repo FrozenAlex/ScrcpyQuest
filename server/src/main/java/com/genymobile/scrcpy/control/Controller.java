@@ -112,7 +112,10 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     // Used for resetting video encoding on RESET_VIDEO message or for sending camera controls
     private SurfaceCapture surfaceCapture;
 
+    private final boolean questCinematic;
+
     public Controller(ControlChannel controlChannel, CleanUp cleanUp, Options options) {
+        questCinematic = options.getQuestCinematic();
         this.camera = options.getVideoSource() == VideoSource.CAMERA;
         this.controlChannel = controlChannel;
         this.cleanUp = cleanUp;
@@ -510,6 +513,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     }
 
     private boolean injectTouch(int action, long pointerId, Position position, float pressure, int actionButton, int buttons) {
+        if (questCinematic) {
+            return false;
+        }
         long now = SystemClock.uptimeMillis();
 
         Pair<Point, Integer> pair = getEventPointAndDisplayId(position);
@@ -621,6 +627,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
     }
 
     private boolean injectScroll(Position position, float hScroll, float vScroll, int buttons) {
+        if (questCinematic) {
+            return false;
+        }
         long now = SystemClock.uptimeMillis();
 
         Pair<Point, Integer> pair = getEventPointAndDisplayId(position);

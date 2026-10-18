@@ -149,10 +149,92 @@ static void test_parse_shortcut_mods(void) {
     assert(!ok);
 }
 
+static void test_quest_cinematic(void) {
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *argv[] = {"scrcpy", "--quest-cinematic"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(argv), argv));
+    assert(args.opts.quest_cinematic);
+    assert(!strcmp(args.opts.max_fps, "60"));
+    assert(args.opts.mouse_input_mode == SC_MOUSE_INPUT_MODE_DISABLED);
+    assert(!scrcpy_options_default.quest_cinematic);
+
+    args.opts = scrcpy_options_default;
+    char *custom[] = {"scrcpy", "--max-fps=30", "--quest-cinematic",
+                      "--max-size=1280", "--video-codec=h265", "--record=test.mkv"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(custom), custom));
+    assert(!strcmp(args.opts.max_fps, "30"));
+    assert(args.opts.max_size == 1280);
+    assert(args.opts.video_codec == SC_CODEC_H265);
+
+    char *conflicts[] = {"--video-source=camera", "--new-display=1920x1080",
+                        "--display-id=1", "--crop=100:100:0:0",
+                        "--capture-orientation=90", "--angle=10", "--no-video",
+                        "--otg", "--flex-display"};
+    for (size_t i = 0; i < ARRAY_LEN(conflicts); ++i) {
+        args.opts = scrcpy_options_default;
+        char *bad[] = {"scrcpy", "--quest-cinematic", conflicts[i]};
+        assert(!scrcpy_parse_args(&args, ARRAY_LEN(bad), bad));
+    }
+}
+
+static void test_quest_device_switches(void) {
+    assert(!scrcpy_options_default.quest_disable_proximity);
+    assert(!scrcpy_options_default.quest_disable_boundary);
+    char *flags[] = {"--quest-disable-proximity", "--quest-disable-boundary"};
+    for (size_t i = 0; i < ARRAY_LEN(flags); ++i) {
+        struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+        char *argv[] = {"scrcpy", flags[i]};
+        assert(scrcpy_parse_args(&args, ARRAY_LEN(argv), argv));
+        assert(args.opts.quest_disable_proximity == (i == 0));
+        assert(args.opts.quest_disable_boundary == (i == 1));
+        assert(!args.opts.quest_cinematic);
+        assert(!args.opts.max_fps);
+
+        args.opts = scrcpy_options_default;
+        char *otg[] = {"scrcpy", flags[i], "--otg"};
+        assert(!scrcpy_parse_args(&args, ARRAY_LEN(otg), otg));
+    }
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *combined[] = {"scrcpy", "--quest-cinematic", flags[0], flags[1],
+                        "--no-cleanup"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(combined), combined));
+    assert(args.opts.quest_cinematic && args.opts.quest_disable_proximity
+           && args.opts.quest_disable_boundary);
+    assert(!strcmp(args.opts.max_fps, "60"));
+
+    args.opts = scrcpy_options_default;
+    char *audio[] = {"scrcpy", flags[0], flags[1], "--no-video"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(audio), audio));
+    assert(!args.opts.video);
+}
+
+static void test_reconnect(void) {
+    assert(!scrcpy_options_default.reconnect);
+    struct scrcpy_cli_args args = {.opts = scrcpy_options_default};
+    char *argv[] = {"scrcpy", "--reconnect", "--quest-cinematic",
+                    "--quest-disable-proximity", "--quest-disable-boundary",
+                    "--record=quest.mp4"};
+    assert(scrcpy_parse_args(&args, ARRAY_LEN(argv), argv));
+    assert(args.opts.reconnect);
+    assert(args.opts.quest_cinematic);
+    assert(!strcmp(args.opts.record_filename, "quest.mp4"));
+
+    char *conflicts[] = {"--otg", "--list-encoders", "--list-displays",
+                        "--list-apps", "--list-cameras"};
+    for (size_t i = 0; i < ARRAY_LEN(conflicts); ++i) {
+        args.opts = scrcpy_options_default;
+        char *bad[] = {"scrcpy", "--reconnect", conflicts[i]};
+        assert(!scrcpy_parse_args(&args, ARRAY_LEN(bad), bad));
+    }
+}
+
 int main(int argc, char *argv[]) {
     (void) argc;
     (void) argv;
 
+    test_quest_cinematic();
+    test_quest_device_switches();
+    test_reconnect();
     test_flag_version();
     test_flag_help();
     test_options();

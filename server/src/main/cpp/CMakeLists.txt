@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22)
+project(scrcpy_quest C)
+add_library(scrcpy-quest SHARED quest_fov.c)
+target_include_directories(scrcpy-quest PRIVATE include)
+target_compile_options(scrcpy-quest PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(scrcpy-quest dl EGL GLESv3 log)

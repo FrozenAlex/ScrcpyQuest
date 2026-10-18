@@ -522,6 +522,42 @@ Set the target directory for pushing files to the device by drag & drop. It is p
 Default is "/sdcard/Download/".
 
 .TP
+.B \-\-quest\-cinematic
+Capture native Quest apps with wider FOV using the installed Meta casting APK.
+Defaults to left-eye 1920x1080 video at 60 fps. Codec, bitrate, recording, audio,
+and max-fps options still apply. Max-size preserves 16:9 and encoder alignment.
+Positional input is disabled. Camera, virtual display, nondefault display, crop,
+capture rotation, disabled video, and OTG modes are incompatible.
+FOV is restored on exit, including an unexpected server exit. Meta software is
+not bundled. Close other casting/recording sessions before use.
+
+.TP
+.B \-\-quest\-disable\-boundary
+Suppress the Quest boundary for this session, restoring the previous temporary
+override on exit or disconnection. Persistent boundary preferences are unchanged.
+Requires a Quest running Android 14 or newer. Incompatible with OTG.
+
+.TP
+.B \-\-quest\-disable\-proximity
+Keep the Quest logically worn regardless of its proximity sensor during this
+session. Existing overrides keep their original lifetime. Overrides created by
+scrcpy are released on exit or disconnection and expire within 30 seconds if the
+cleanup process also dies. Requires a Quest running Android 14 or newer.
+Incompatible with OTG. Both device switches work independently of cinematic
+capture and restore session changes even with --no-cleanup.
+
+.TP
+.B \-\-reconnect
+After connection loss, retry the same device every 2 seconds until it returns.
+The previous session is cleaned up before starting a fresh one. The playback
+window stays open with its last frame, position, size and fullscreen state
+preserved. Close the window or press Ctrl+C to stop, including while waiting
+to reconnect. Initial connection errors are not retried.
+Recording resumes in numbered files (name.part002.mp4, name.part003.mp4, etc.),
+skipping existing files. Time-limit applies to each connected session; reaching
+it stops retries. Incompatible with OTG and listing modes.
+
+.TP
 .BI "\-r, \-\-record " file
 Record screen to
 .IR file .

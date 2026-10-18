@@ -327,3 +327,80 @@ scrcpy --no-video
 ## Video4Linux
 
 See the dedicated [Video4Linux](v4l2.md) page.
+
+
+## Quest cinematic capture
+
+```bash
+scrcpy --quest-cinematic
+scrcpy --quest-cinematic --max-size=1280 --max-fps=30 --record=quest.mkv
+```
+
+This experimental mode captures native Quest applications with the headset's
+cinematic projection: left eye, 57-degree inward/outward FOV overrides, default
+vertical FOV, and capture-FOV adjustment 32. It feeds the runtime's capture surface
+directly into scrcpy's encoder; it does not crop ordinary screen mirroring.
+Default output is 1920x1080 at 60 fps. Existing codec, bitrate, audio and recording
+options apply. `--max-size` rounds down to an exact 16:9 size satisfying encoder
+alignment (for example 1280x720). Stronger encoder alignment can also reduce 1080p.
+
+The enabled, original Meta casting APK (`com.oculus.magicislandcastingservice`)
+must already be installed on the headset, for example by Meta Quest Developer
+Hub. Neither that APK nor any Meta native binary is included in scrcpy. The small
+ARM64 FOV reader is independently implemented and loads the headset's runtime.
+Tested on Quest 3, firmware `52433670036000520`, casting APK `2.0.0.0.7440`, capture
+service version 10. Unsupported service versions fail explicitly. If the service
+is not yet published, initialize headset casting first and retry.
+
+Close other headset casting and recording sessions before starting. This firmware
+has one global capture output; its stop API accepts a session ID but does not
+isolate sessions. This mode releases its own encoder surface instead of issuing
+that global stop command. Concurrent use with MQDH or another recorder is unsupported.
+The request keeps the capture indicator visible (headset settings still apply), stabilization remains disabled, and
+protected-content/capture-inhibit behavior is preserved. An asleep headset can
+produce black video; keep it awake for viewing.
+
+FOV is read before any change. A detached cleanup process is armed before the
+preset is applied and verifies restoration after exit or cable disconnection.
+This FOV restoration remains enabled with `--no-cleanup`. If the installed APK
+fails or its command protocol changes, the mode fails with an explicit error.
+No games are restarted. PCVR and runtime cinematic hotkeys are unsupported.
+
+Camera capture, virtual displays, a nondefault display ID, cropping, capture
+rotation, disabled video, flex displays, and OTG cannot be combined with this
+mode. Mouse/touch positioning is disabled because this projection does not map
+to Android display coordinates; keyboard and gamepad input remain available.
+
+Building the server now requires NDK r27c and CMake. The manual server build uses
+`ANDROID_NDK_HOME`; Gradle uses the configured Android SDK's NDK installation.
+
+See [Quest cinematic validation](quest-cinematic-testing.md) for tested behavior,
+hardware test commands, and remaining validation limits.
+
+## Quest proximity and boundary switches
+
+```bash
+scrcpy --quest-disable-proximity --quest-disable-boundary
+scrcpy --quest-cinematic --quest-disable-proximity --quest-disable-boundary
+```
+
+`--quest-disable-proximity` keeps the headset logically worn when the physical
+proximity sensor is uncovered. `--quest-disable-boundary` suppresses the boundary
+for the session. They work independently, with ordinary or cinematic capture,
+on supported Quest firmware running Android 14 or newer. OTG is incompatible
+because these switches require ADB. They use the headset's system services and
+do not require the Meta casting APK unless cinematic capture is also enabled.
+
+The switches use a temporary boundary property and a renewable 30-second
+proximity override. A detached helper restores changes after normal exit or
+disconnection, including with `--no-cleanup`. Persistent boundary preferences
+are untouched. Existing boundary suppression and proximity overrides are left
+alone; an existing proximity override retains its original timeout. If it expires
+during the session, scrcpy starts its own override. If both scrcpy and its helper
+are killed, scrcpy's proximity override expires within 30 seconds; boundary
+restoration requires the helper to survive. Only one scrcpy device-settings
+session can run at a time. Avoid changing these overrides from other tools while
+the session runs, because the firmware controls are global.
+
+Unsupported or conflicting firmware states fail explicitly. See the
+[validation report](quest-cinematic-testing.md) for device coverage.

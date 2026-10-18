@@ -17,6 +17,8 @@ import com.genymobile.scrcpy.model.NewDisplay;
 import com.genymobile.scrcpy.opengl.OpenGLRunner;
 import com.genymobile.scrcpy.util.Ln;
 import com.genymobile.scrcpy.util.LogUtils;
+import com.genymobile.scrcpy.quest.QuestCapture;
+import com.genymobile.scrcpy.quest.QuestDeviceSession;
 import com.genymobile.scrcpy.video.CameraCapture;
 import com.genymobile.scrcpy.video.NewDisplayCapture;
 import com.genymobile.scrcpy.video.ScreenCapture;
@@ -85,6 +87,10 @@ public final class Server {
             }
         }
 
+        if (options.getQuestCinematic()) {
+            QuestCapture.validate(options);
+        }
+
         CleanUp cleanUp = null;
 
         if (options.getCleanup()) {
@@ -103,7 +109,9 @@ public final class Server {
         List<AsyncProcessor> asyncProcessors = new ArrayList<>();
 
         DesktopConnection connection = DesktopConnection.open(scid, tunnelForward, video, audio, control, sendDummyByte);
+        QuestDeviceSession questSettings = null;
         try {
+            questSettings = QuestDeviceSession.start(options);
             if (options.getSendDeviceMeta()) {
                 connection.sendDeviceMeta(Device.getDeviceName());
             }
@@ -140,7 +148,9 @@ public final class Server {
                 Streamer videoStreamer = new Streamer(connection.getVideoFd(), options.getVideoCodec(), options.getSendStreamMeta(),
                         options.getSendFrameMeta());
                 SurfaceCapture surfaceCapture;
-                if (options.getVideoSource() == VideoSource.DISPLAY) {
+                if (options.getQuestCinematic()) {
+                    surfaceCapture = new QuestCapture(options);
+                } else if (options.getVideoSource() == VideoSource.DISPLAY) {
                     NewDisplay newDisplay = options.getNewDisplay();
                     if (newDisplay != null) {
                         surfaceCapture = new NewDisplayCapture(controller, options);
@@ -168,29 +178,35 @@ public final class Server {
 
             Looper.loop(); // interrupted by the Completion implementation
         } finally {
-            if (cleanUp != null) {
-                cleanUp.interrupt();
-            }
-            for (AsyncProcessor asyncProcessor : asyncProcessors) {
-                asyncProcessor.stop();
-            }
-
-            connection.shutdown();
-
             try {
                 if (cleanUp != null) {
-                    cleanUp.join();
+                    cleanUp.interrupt();
                 }
                 for (AsyncProcessor asyncProcessor : asyncProcessors) {
-                    asyncProcessor.join();
+                    asyncProcessor.stop();
                 }
 
-                OpenGLRunner.shutdown();
-            } catch (InterruptedException e) {
-                // ignore
-            }
+                connection.shutdown();
 
-            connection.close();
+                try {
+                    if (cleanUp != null) {
+                        cleanUp.join();
+                    }
+                    for (AsyncProcessor asyncProcessor : asyncProcessors) {
+                        asyncProcessor.join();
+                    }
+
+                    OpenGLRunner.shutdown();
+                } catch (InterruptedException e) {
+                    // ignore
+                }
+
+                connection.close();
+            } finally {
+                if (questSettings != null) {
+                    questSettings.close();
+                }
+            }
         }
     }
 

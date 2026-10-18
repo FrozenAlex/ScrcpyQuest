@@ -99,6 +99,7 @@ struct sc_screen {
     AVFrame *resume_frame;
 
     bool disconnected;
+    bool reconnect;
     bool disconnect_started;
     struct sc_disconnect disconnect;
 
@@ -114,6 +115,7 @@ struct sc_screen {
 };
 
 struct sc_screen_params {
+    bool reconnect;
     bool video;
     bool camera;
     bool flex_display;
@@ -155,6 +157,16 @@ struct sc_screen_params {
 // initialize screen, create window, renderer and texture (window is hidden)
 bool
 sc_screen_init(struct sc_screen *screen, const struct sc_screen_params *params);
+
+// Rebind session input after all producers from the previous session joined.
+void
+sc_screen_reconnect(struct sc_screen *screen,
+                    const struct sc_screen_params *params);
+
+// Drop pending session data, retaining the window and its displayed frame.
+// Must only be called after all frame producers have joined.
+void
+sc_screen_suspend(struct sc_screen *screen);
 
 // request to interrupt any inner thread
 // must be called before sc_screen_join()
@@ -201,8 +213,8 @@ sc_screen_set_paused(struct sc_screen *screen, bool paused);
 void
 sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event);
 
-// run the event loop once the device is disconnected
-void
+// Run the event loop once disconnected; true means quit or time limit reached.
+bool
 sc_screen_handle_disconnection(struct sc_screen *screen);
 
 // convert point from window coordinates to frame coordinates

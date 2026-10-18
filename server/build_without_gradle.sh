@@ -22,7 +22,7 @@ BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
 BUILD_DIR="$(realpath ${BUILD_DIR:-build_manual})"
 CLASSES_DIR="$BUILD_DIR/classes"
 GEN_DIR="$BUILD_DIR/gen"
-SERVER_DIR=$(dirname "$0")
+SERVER_DIR=$(realpath "$(dirname "$0")")
 SERVER_BINARY=scrcpy-server
 ANDROID_JAR="$PLATFORM_TOOLS/android.jar"
 ANDROID_AIDL="$PLATFORM_TOOLS/framework.aidl"
@@ -64,6 +64,7 @@ SRC=( \
     com/genymobile/scrcpy/device/*.java \
     com/genymobile/scrcpy/display/*.java \
     com/genymobile/scrcpy/model/*.java \
+    com/genymobile/scrcpy/quest/*.java \
     com/genymobile/scrcpy/opengl/*.java \
     com/genymobile/scrcpy/util/*.java \
     com/genymobile/scrcpy/video/*.java \
@@ -113,5 +114,15 @@ else
 fi
 
 rm -rf "$GEN_DIR" "$CLASSES_DIR"
+
+# The bridge is our own code; no Meta binaries are packaged.
+: "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to build the ARM64 Quest FOV reader}"
+cmake -S "$SERVER_DIR/src/main/cpp" -B "$BUILD_DIR/quest-native" \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 -DCMAKE_BUILD_TYPE=Release
+cmake --build "$BUILD_DIR/quest-native"
+mkdir -p "$BUILD_DIR/lib/arm64-v8a"
+cp "$BUILD_DIR/quest-native/libscrcpy-quest.so" "$BUILD_DIR/lib/arm64-v8a/"
+jar uf "$BUILD_DIR/$SERVER_BINARY" -C "$BUILD_DIR" lib/arm64-v8a/libscrcpy-quest.so
 
 echo "Server generated in $BUILD_DIR/$SERVER_BINARY"

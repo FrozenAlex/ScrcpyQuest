@@ -324,6 +324,10 @@ struct scrcpy_options {
 #ifdef HAVE_USB
     bool otg;
 #endif
+    bool quest_cinematic;
+    bool quest_disable_proximity;
+    bool quest_disable_boundary;
+    bool reconnect;
     bool show_touches;
     bool fullscreen;
     bool always_on_top;

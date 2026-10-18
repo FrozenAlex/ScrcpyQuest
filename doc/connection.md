@@ -119,6 +119,36 @@ bypass having to physically connect your device to your computer.
 [adb-wireless]: https://developer.android.com/studio/command-line/adb#wireless-android11-command-line
 
 
+## Automatic reconnection
+
+This build supports opt-in automatic reconnection:
+
+```bash
+scrcpy --reconnect
+scrcpy --reconnect --quest-cinematic --quest-disable-proximity --quest-disable-boundary
+```
+
+After an established connection drops, scrcpy cleans up the old session and
+retries the same device every two seconds. The playback window stays open with
+its last frame, position, size, and fullscreen state preserved. Its title shows
+that it is reconnecting, and input is disabled until the connection returns.
+Playback resumes in the same window. It remembers the selected USB serial or TCP/IP address, including
+when the initial selection was automatic. It does not switch to another attached
+device or discover a changed IP address. TCP/IP retries issue `adb connect` again.
+
+Close the window or press Ctrl+C to stop, including while waiting to reconnect.
+Initial connection failures and codec/recording errors still exit. The option
+is incompatible with OTG and listing modes. `--time-limit` applies separately to
+each connected session; reaching the limit stops the whole run.
+
+With `--record=quest.mp4`, the first session uses that filename and subsequent
+attempts use `quest.part002.mp4`, `quest.part003.mp4`, and so on. Existing numbered
+files are skipped. Unsuccessful connection attempts can leave gaps in numbering.
+Each segment is a separate recording; the disconnected interval is not recorded.
+
+Quest FOV and device-setting cleanup runs on disconnection as before. A new
+connection reapplies the requested Quest options with a fresh cleanup guard.
+
 ## Autostart
 
 A small tool (by the scrcpy author) allows you to run arbitrary commands

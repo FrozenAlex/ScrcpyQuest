@@ -33,9 +33,12 @@ run_timeout(void *data) {
         timed_out = !sc_cond_timedwait(&timeout->cond, &timeout->mutex,
                     deadline);
     }
+    bool notify = timed_out && !timeout->stopped;
     sc_mutex_unlock(&timeout->mutex);
 
-    timeout->cbs->on_timeout(timeout, timeout->cbs_userdata);
+    if (notify) {
+        timeout->cbs->on_timeout(timeout, timeout->cbs_userdata);
+    }
 
     return 0;
 }

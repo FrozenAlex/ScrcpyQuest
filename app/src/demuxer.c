@@ -134,7 +134,7 @@ sc_demuxer_parse_session(const uint8_t *header,
 
 static bool
 sc_demuxer_recv_packet(struct sc_demuxer *demuxer, const uint8_t *header,
-                       AVPacket *packet) {
+                       AVPacket *packet, enum sc_demuxer_status *status) {
     assert(!sc_demuxer_is_session(header));
     uint64_t pts_flags = sc_read64be(header);
     uint32_t len = sc_read32be(&header[8]);
@@ -151,6 +151,7 @@ sc_demuxer_recv_packet(struct sc_demuxer *demuxer, const uint8_t *header,
     ssize_t r = net_recv_all(demuxer->socket, packet->data, len);
     if (r < 0 || ((uint32_t) r) < len) {
         av_packet_unref(packet);
+        *status = SC_DEMUXER_STATUS_EOS;
         return false;
     }
 
@@ -194,6 +195,7 @@ run_demuxer(void *data) {
     if (!ok) {
         LOGE("Demuxer '%s': stream disabled due to connection error",
              demuxer->name);
+        status = SC_DEMUXER_STATUS_EOS;
         goto end;
     }
 
@@ -237,6 +239,7 @@ run_demuxer(void *data) {
     if (codec_type == AVMEDIA_TYPE_VIDEO) {
         bool ok = sc_demuxer_recv_header(demuxer, header);
         if (!ok) {
+            status = SC_DEMUXER_STATUS_EOS;
             goto finally_free_params;
         }
 
@@ -308,7 +311,7 @@ run_demuxer(void *data) {
                 break;
             }
         } else {
-            bool ok = sc_demuxer_recv_packet(demuxer, header, packet);
+            bool ok = sc_demuxer_recv_packet(demuxer, header, packet, &status);
             if (!ok) {
                 break;
             }

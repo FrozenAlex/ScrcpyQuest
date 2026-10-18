@@ -56,6 +56,9 @@ struct sc_server_params {
     bool video;
     bool audio;
     bool audio_dup;
+    bool quest_cinematic;
+    bool quest_disable_proximity;
+    bool quest_disable_boundary;
     bool show_touches;
     bool stay_awake;
     bool force_adb_forward;

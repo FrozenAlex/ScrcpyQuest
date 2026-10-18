@@ -4,6 +4,10 @@
 
 const struct scrcpy_options scrcpy_options_default = {
     .serial = NULL,
+    .quest_cinematic = false,
+    .quest_disable_proximity = false,
+    .quest_disable_boundary = false,
+    .reconnect = false,
     .crop = NULL,
     .record_filename = NULL,
     .window_title = NULL,
